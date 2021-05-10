@@ -26,6 +26,7 @@
 /* ----------------------- Variables ----------------------------------------*/
 static eMBEventType eQueuedEvent;
 static BOOL     xEventInQueue;
+BOOL            xMBPortTCPPool( void );
 
 /* ----------------------- Start implementation -----------------------------*/
 BOOL
@@ -53,6 +54,9 @@ xMBPortEventGet( eMBEventType * eEvent )
         *eEvent = eQueuedEvent;
         xEventInQueue = FALSE;
         xEventHappened = TRUE;
+    }
+    else {
+        (void)xMBPortTCPPool();
     }
     return xEventHappened;
 }

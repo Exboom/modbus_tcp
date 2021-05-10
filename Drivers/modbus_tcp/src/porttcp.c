@@ -35,14 +35,14 @@
 #define MB_TCP_UID          6
 #define MB_TCP_LEN          4
 #define MB_TCP_FUNC         7
-#define HTTP_SOCKET         2
+#define HTTP_SOCKET         0
 
 #define MB_TCP_DEFAULT_PORT  502          /* TCP listening port. */
 #define MB_TCP_BUF_SIZE     ( 256 + 7 )   /* Must hold a complete Modbus TCP frame. */
 
 /* ----------------------- Prototypes ---------------------------------------*/
-static UCHAR    aucTCPBuf[MB_TCP_BUF_SIZE];	   //���ջ�����
-static USHORT   usTCPBufLen;
+static UCHAR   aucTCPBuf[MB_TCP_BUF_SIZE];	   //���ջ�����
+static USHORT  usTCPBufLen;
 
 
 BOOL
@@ -59,7 +59,6 @@ xMBTCPPortInit( USHORT usTCPPort )
     {
         usPort = (USHORT)usTCPPort;
     }
-
     printf("Creating socket...\r\n");
     uint8_t http_socket = HTTP_SOCKET;
     uint8_t code = socket(http_socket, Sn_MR_TCP, usPort, 0);
@@ -112,8 +111,8 @@ xMBTCPPortSendResponse(const UCHAR * pucMBTCPFrame, USHORT usTCPLength )
 BOOL
 xMBPortTCPPool( void )
 {  
-	unsigned short int us_rlen;
-    unsigned char buf;
+	uint8_t us_rlen;
+    uint8_t buf;
 //	i=Read_1_Byte(SIR);
     buf=WIZCHIP_READ(SIR);
 
@@ -125,36 +124,36 @@ xMBPortTCPPool( void )
         send(0, &buf, 1);
 
 
-		us_rlen	= Read_SOCK_Data_Buffer(0, aucTCPBuf);	//�������ݷŵ�aucTCPBuf��
+//		us_rlen	= Read_SOCK_Data_Buffer(0, aucTCPBuf);
+        recv (0, &us_rlen, aucTCPBuf);
 		if(us_rlen==0)
 		return FALSE;
-		usTCPBufLen = us_rlen;				 //���������ݣ��õ�����
+		usTCPBufLen = us_rlen;
 
-	( void )xMBPortEventPost( EV_FRAME_RECEIVED );			//�����ѽ��յ������ݵ�Modbus-TCP״̬��
+	( void )xMBPortEventPost( EV_FRAME_RECEIVED );
 
-		if(buf&IR_DISCON)		/* TCP Disconnect */
+		if(buf&(0x02))		/* TCP Disconnect */
 		{
-			Socket_Listen(0);		//���¼���SOCK 0
+			close(0);		//���¼���SOCK 0
 		}
-		if(buf&IR_TIMEOUT)		   //��ʱ
+		if(buf&(0x08))		   //��ʱ
 		{
-			Socket_Listen(0);		//���¼���SOCK 0
+			close(0);		//���¼���SOCK 0
 		}
 	 }
 
-	
-	
+
 	return TRUE;
 }
 
-void
+/*void
 EnterCriticalSection( void )
 {
   __disable_irq();
-}
+}*/
 
-void
+/*void
 ExitCriticalSection( void )
 {
   __enable_irq();
-}
+}*/

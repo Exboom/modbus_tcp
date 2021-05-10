@@ -35,8 +35,11 @@
 #include <stdio.h>
 #include "socket.h"
 #include "dhcp.h"
-#include "dns.h"
+//#include "dns.h"
 #include "w5500.h"
+#include "mb.h"
+#include "mbproto.h"
+#include "mbutils.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -49,6 +52,14 @@
 #define DHCP_SOCKET     0
 #define DNS_SOCKET      1
 #define HTTP_SOCKET     2
+#define REG_HOLDING_START 1000
+#define REG_HOLDING_NREGS 4
+#define REG_INPUT_START 1000
+#define REG_INPUT_NREGS 4
+#define REG_COILS_START     1000
+#define REG_COILS_SIZE      16
+#define REG_DISC_START     1000
+#define REG_DISC_SIZE      16
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -62,6 +73,12 @@
 uint8_t dhcp_buffer[1024];
 uint8_t dns_buffer[1024];
 volatile bool ip_assigned = false;
+static unsigned short usRegHoldingStart = REG_HOLDING_START;
+static unsigned short usRegHoldingBuf[REG_HOLDING_NREGS]={0xaa,0x55,0x5599,0x5588};
+static unsigned short usRegInputStart = REG_INPUT_START;
+static unsigned short usRegInputBuf[REG_INPUT_NREGS]={0,0,0x5599,0x5588};
+static unsigned char ucRegCoilsBuf[REG_COILS_SIZE / 8]={0xaa,0xfe};
+static unsigned char ucRegDiscBuf[REG_DISC_SIZE / 8] = { 0x98, 0x6e };
 // uint8_t reg=0;
 /* USER CODE END PV */
 
@@ -111,12 +128,14 @@ void init_w5500() {
   printf("Calling DHCP_init()...\r\n");
   wiz_NetInfo net_info = {
     .mac  = { 0xEA, 0x11, 0x22, 0x33, 0x44, 0xEA },
+/*    .ip = {192, 168, 31, 144},
+    .sn = {255, 255, 255, 0},
+    .gw = {192, 168, 31, 1},*/
     .dhcp = NETINFO_DHCP
-    // .ip = {0xC0, 0xA8, 0x01, 0x03},
-    // .sn = {0xFF, 0xFF, 0xFF, 0x00}
   };
 
   setSHAR(net_info.mac);
+
   DHCP_init(DHCP_SOCKET, dhcp_buffer);
 
   printf("Registering DHCP callbacks...\r\n");
@@ -141,23 +160,24 @@ void init_w5500() {
   getGWfromDHCP(net_info.gw);
   getSNfromDHCP(net_info.sn);
 
-  uint8_t dns[4];
-  getDNSfromDHCP(dns);
+/*  uint8_t dns[4];
+  getDNSfromDHCP(dns);*/
 
   printf("IP:  %d.%d.%d.%d\r\nGW:  %d.%d.%d.%d\r\nNet: %d.%d.%d.%d\r\nDNS: %d.%d.%d.%d\r\n",
     net_info.ip[0], net_info.ip[1], net_info.ip[2], net_info.ip[3],
     net_info.gw[0], net_info.gw[1], net_info.gw[2], net_info.gw[3],
-    net_info.sn[0], net_info.sn[1], net_info.sn[2], net_info.sn[3],
-    dns[0], dns[1], dns[2], dns[3]
+    net_info.sn[0], net_info.sn[1], net_info.sn[2], net_info.sn[3]
   );
 
   printf("Calling wizchip_setnetinfo()...\r\n");
   wizchip_setnetinfo(&net_info);
+  printf("State Sn_CR reg: %d\r\n", WIZCHIP_READ(Sn_SR(0)));
 
-  printf("Calling DNS_init()...\r\n");
-  DNS_init(DNS_SOCKET, dns_buffer);
 
-  uint8_t addr[4];
+/*  printf("Calling DNS_init()...\r\n");
+  DNS_init(DNS_SOCKET, dns_buffer);*/
+
+/*  uint8_t addr[4];
   {
     char domain_name[] = "eax.me";
     printf("Resolving domain name \"%s\"...\r\n", domain_name);
@@ -167,9 +187,9 @@ void init_w5500() {
       return;
     }
     printf("Result: %d.%d.%d.%d\r\n", addr[0], addr[1], addr[2], addr[3]);
-  }
+  }*/
 
-  printf("Creating socket...\r\n");
+ /* printf("Creating socket...\r\n");
   uint8_t http_socket = HTTP_SOCKET;
   uint8_t code = socket(http_socket, Sn_MR_TCP, 10888, 0);
   if(code != http_socket) {
@@ -222,7 +242,7 @@ void init_w5500() {
     }
   }
   printf("Closing socket.\r\n");
-  close(http_socket);
+  close(http_socket);*/
 }
 /* USER CODE END PFP */
 
@@ -238,7 +258,7 @@ void init_w5500() {
 int main(void)
 {
   /* USER CODE BEGIN 1 */
-
+  unsigned char i;
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -266,24 +286,33 @@ int main(void)
   MX_TIM1_Init();
   MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
-  //init_w5500();
-  /* USER CODE END 2 */
+  init_w5500();
+  HAL_Delay(200);
+  eMBTCPInit(502);
+  HAL_Delay(200);
+  eMBEnable();
+  printf("\r\nModbus-TCP Start!\r\n");
+    /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-
-    if (LL_GPIO_ReadInputPort(GPIOA)&GPIO_IDR_IDR_0) {
-      LL_GPIO_SetOutputPin(LD3_GPIO_Port, LD3_Pin);
-      init_w5500();
-    } else {
-      LL_GPIO_ResetOutputPin(LD3_GPIO_Port, LD3_Pin);
+    i=WIZCHIP_READ(Sn_SR(0));
+    if (i==0) {
+        do {
+            HAL_Delay(100);
+        } while (listen(0)==FALSE);
+    } else if ((i==SOCK_LISTEN)||(i==SOCK_ESTABLISHED)) {
+//        LL_GPIO_SetOutputPin(LD3_GPIO_Port, LD3_Pin);
+        eMBPoll();
+//        LL_GPIO_ResetOutputPin(LD3_GPIO_Port, LD3_Pin);
     }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
   }
+
   /* USER CODE END 3 */
 }
 
@@ -335,6 +364,161 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
+
+eMBErrorCode
+eMBRegHoldingCB( UCHAR * pucRegBuffer, USHORT usAddress, USHORT usNRegs,
+                 eMBRegisterMode eMode )
+{
+    eMBErrorCode    eStatus = MB_ENOERR;
+    int             iRegIndex;
+
+    if( ( usAddress >= REG_HOLDING_START ) &&
+        ( usAddress + usNRegs <= REG_HOLDING_START + REG_HOLDING_NREGS ) )
+    {
+        iRegIndex = ( int )( usAddress - usRegHoldingStart );
+        switch ( eMode )
+        {
+            /* Pass current register values to the protocol stack. */
+            case MB_REG_READ:
+                while( usNRegs > 0 )
+                {
+                    *pucRegBuffer++ =
+                            ( unsigned char )( usRegHoldingBuf[iRegIndex] >> 8 );
+                    *pucRegBuffer++ =
+                            ( unsigned char )( usRegHoldingBuf[iRegIndex] &
+                                               0xFF );
+                    iRegIndex++;
+                    usNRegs--;
+                }
+                break;
+
+                /* Update current register values with new values from the
+                 * protocol stack. */
+            case MB_REG_WRITE:
+                while( usNRegs > 0 )
+                {
+                    usRegHoldingBuf[iRegIndex] = *pucRegBuffer++ << 8;
+                    usRegHoldingBuf[iRegIndex] |= *pucRegBuffer++;
+                    iRegIndex++;
+                    usNRegs--;
+                }
+        }
+    }
+    else
+    {
+        eStatus = MB_ENOREG;
+    }
+    return eStatus;
+}
+
+eMBErrorCode
+eMBRegInputCB( UCHAR * pucRegBuffer, USHORT usAddress, USHORT usNRegs )
+{
+    eMBErrorCode    eStatus = MB_ENOERR;
+    int             iRegIndex;
+
+    if( ( usAddress >= REG_INPUT_START )
+        && ( usAddress + usNRegs <= REG_INPUT_START + REG_INPUT_NREGS ) )
+    {
+        iRegIndex = ( int )( usAddress - usRegInputStart );
+        while( usNRegs > 0 )
+        {
+            *pucRegBuffer++ =
+                    ( unsigned char )( usRegInputBuf[iRegIndex] >> 8 );
+            *pucRegBuffer++ =
+                    ( unsigned char )( usRegInputBuf[iRegIndex] & 0xFF );
+            iRegIndex++;
+            usNRegs--;
+        }
+    }
+    else
+    {
+        eStatus = MB_ENOREG;
+    }
+
+    return eStatus;
+}
+
+eMBErrorCode
+eMBRegCoilsCB( UCHAR * pucRegBuffer, USHORT usAddress, USHORT usNCoils,
+               eMBRegisterMode eMode )
+{
+    eMBErrorCode    eStatus = MB_ENOERR;
+    int             iNCoils = ( int )usNCoils;
+    unsigned short  usBitOffset;
+
+    /* Check if we have registers mapped at this block. */
+    if( ( usAddress >= REG_COILS_START ) &&
+        ( usAddress + usNCoils <= REG_COILS_START + REG_COILS_SIZE ) )
+    {
+        usBitOffset = ( unsigned short )( usAddress - REG_COILS_START );
+        switch ( eMode )
+        {
+            /* Read current values and pass to protocol stack. */
+            case MB_REG_READ:
+                while( iNCoils > 0 )
+                {
+                    *pucRegBuffer++ =
+                            xMBUtilGetBits( ucRegCoilsBuf, usBitOffset,
+                                            ( unsigned char )( iNCoils >
+                                                               8 ? 8 :
+                                                               iNCoils ) );
+                    iNCoils -= 8;
+                    usBitOffset += 8;
+                }
+                break;
+
+                /* Update current register values. */
+            case MB_REG_WRITE:
+                while( iNCoils > 0 )
+                {
+                    xMBUtilSetBits( ucRegCoilsBuf, usBitOffset,
+                                    ( unsigned char )( iNCoils > 8 ? 8 : iNCoils ),
+                                    *pucRegBuffer++ );
+                    iNCoils -= 8;
+                    usBitOffset += 8;
+                }
+                break;
+        }
+
+    }
+    else
+    {
+        eStatus = MB_ENOREG;
+    }
+    return eStatus;
+}
+
+eMBErrorCode
+eMBRegDiscreteCB( UCHAR * pucRegBuffer, USHORT usAddress, USHORT usNDiscrete )
+{
+    eMBErrorCode    eStatus = MB_ENOERR;
+    short           iNDiscrete = ( short )usNDiscrete;
+    unsigned short  usBitOffset;
+
+    /* Check if we have registers mapped at this block. */
+    if( ( usAddress >= REG_DISC_START ) &&
+        ( usAddress + usNDiscrete <= REG_DISC_START + REG_DISC_SIZE ) )
+    {
+        usBitOffset = ( unsigned short )( usAddress - REG_DISC_START );
+        while( iNDiscrete > 0 )
+        {
+            *pucRegBuffer++ =
+                    xMBUtilGetBits( ucRegDiscBuf, usBitOffset,
+                                    ( unsigned char )( iNDiscrete >
+                                                       8 ? 8 : iNDiscrete ) );
+            iNDiscrete -= 8;
+            usBitOffset += 8;
+        }
+    }
+    else
+    {
+        eStatus = MB_ENOREG;
+    }
+    return eStatus;
+}
+
+
 int __io_putchar(int ch) {
   ITM_SendChar(ch);
   return ch;
