@@ -23,10 +23,9 @@
 #include <stdio.h>
 #include <string.h>
 #include "port.h"
-
-/* ----------------------- uIP includes ------------------------------------*/
-// #include "uip_modbus.h"
-// #include "uip.h"
+#include "w5500.h"
+#include "socket.h"
+//#include "device.h"
 
 /* ----------------------- Modbus includes ----------------------------------*/
 #include "mb.h"
@@ -36,38 +35,21 @@
 #define MB_TCP_UID          6
 #define MB_TCP_LEN          4
 #define MB_TCP_FUNC         7
-
-/* ----------------------- Defines  -----------------------------------------*/
-#define DEBUG 1
-#if DEBUG
-#define PRINTF(...) printf(__VA_ARGS__)
-#else
-#define PRINTF(...)
-#endif
+#define HTTP_SOCKET         2
 
 #define MB_TCP_DEFAULT_PORT  502          /* TCP listening port. */
 #define MB_TCP_BUF_SIZE     ( 256 + 7 )   /* Must hold a complete Modbus TCP frame. */
 
 /* ----------------------- Prototypes ---------------------------------------*/
-static UCHAR    ucTCPRequestFrame[MB_TCP_BUF_SIZE];
-static USHORT   ucTCPRequestLen;
-
-static UCHAR    ucTCPResponseFrame[MB_TCP_BUF_SIZE];
-static USHORT   ucTCPResponseLen;
-
-BOOL   bFrameSent = FALSE;
-
-/* ----------------------- Static variables ---------------------------------*/
-
-/* ----------------------- Static functions ---------------------------------*/
+static UCHAR    aucTCPBuf[MB_TCP_BUF_SIZE];	   //���ջ�����
+static USHORT   usTCPBufLen;
 
 
-/* ----------------------- Begin implementation -----------------------------*/
 BOOL
 xMBTCPPortInit( USHORT usTCPPort )
 {
     BOOL bOkay = FALSE;
-    
+
     USHORT usPort;
     if( usTCPPort == 0 )
     {
@@ -77,9 +59,18 @@ xMBTCPPortInit( USHORT usTCPPort )
     {
         usPort = (USHORT)usTCPPort;
     }
-    
-    uip_listen(HTONS(usPort));
-    
+
+    printf("Creating socket...\r\n");
+    uint8_t http_socket = HTTP_SOCKET;
+    uint8_t code = socket(http_socket, Sn_MR_TCP, usPort, 0);
+    if(code != http_socket) {
+        printf("socket() failed, code = %d\r\n", code);
+        return;
+    }
+    //Socket0_Config(usPort);
+    listen(HTTP_SOCKET);
+    //Socket_Listen(0);
+
     bOkay = TRUE;
     return bOkay;
 }
@@ -88,63 +79,82 @@ xMBTCPPortInit( USHORT usTCPPort )
 void 
 vMBTCPPortClose(  )
 {
-    
+	
 }
 
 void
 vMBTCPPortDisable( void )
 {
-    
+	   
 }
 
 BOOL
 xMBTCPPortGetRequest( UCHAR ** ppucMBTCPFrame, USHORT * usTCPLength )
 {
-    *ppucMBTCPFrame = &ucTCPRequestFrame[0];
-    *usTCPLength = ucTCPRequestLen;
-    
+	*ppucMBTCPFrame = &aucTCPBuf[0];
+    *usTCPLength = usTCPBufLen;
     /* Reset the buffer. */
-    ucTCPRequestLen = 0;
+    usTCPBufLen = 0;
     return TRUE;
 }
 
 BOOL
-xMBTCPPortSendResponse( const UCHAR * pucMBTCPFrame, USHORT usTCPLength )
+xMBTCPPortSendResponse(const UCHAR * pucMBTCPFrame, USHORT usTCPLength )
 {
-    memcpy( ucTCPResponseFrame , pucMBTCPFrame , usTCPLength);
-    ucTCPResponseLen = usTCPLength;
-    
-    bFrameSent = TRUE;
-    return bFrameSent;
+
+//	Write_SOCK_Data_Buffer( 0,(UCHAR*)pucMBTCPFrame, usTCPLength);
+    send( 0,(UCHAR*)pucMBTCPFrame, usTCPLength);
+    return TRUE;
 }
 
 
-void uip_modbus_appcall(void)
+
+BOOL
+xMBPortTCPPool( void )
+{  
+	unsigned short int us_rlen;
+    unsigned char buf;
+//	i=Read_1_Byte(SIR);
+    buf=WIZCHIP_READ(SIR);
+
+	if(buf&0x01)
+	{
+//		i=Read_SOCK_1_Byte(0,Sn_IR(0));
+        recv(0, &buf,1);
+//		Write_SOCK_1_Byte(0,Sn_IR(0),i);
+        send(0, &buf, 1);
+
+
+		us_rlen	= Read_SOCK_Data_Buffer(0, aucTCPBuf);	//�������ݷŵ�aucTCPBuf��
+		if(us_rlen==0)
+		return FALSE;
+		usTCPBufLen = us_rlen;				 //���������ݣ��õ�����
+
+	( void )xMBPortEventPost( EV_FRAME_RECEIVED );			//�����ѽ��յ������ݵ�Modbus-TCP״̬��
+
+		if(buf&IR_DISCON)		/* TCP Disconnect */
+		{
+			Socket_Listen(0);		//���¼���SOCK 0
+		}
+		if(buf&IR_TIMEOUT)		   //��ʱ
+		{
+			Socket_Listen(0);		//���¼���SOCK 0
+		}
+	 }
+
+	
+	
+	return TRUE;
+}
+
+void
+EnterCriticalSection( void )
 {
-    if(uip_connected())
-    {
-        PRINTF("connected!\r\n");
-    }
-    
-    if(uip_closed())
-    {
-        PRINTF("closed\r\n");
-    }
-    
-    if(uip_newdata())
-    {
-        PRINTF("request!\r\n");
-        memcpy(ucTCPRequestFrame, uip_appdata, uip_len );
-        ucTCPRequestLen = uip_len;
-        xMBPortEventPost( EV_FRAME_RECEIVED );
-    }
-    
-    if(uip_poll())
-    {
-        if(bFrameSent)
-        {
-            bFrameSent = FALSE;
-            uip_send( ucTCPResponseFrame , ucTCPResponseLen );
-        }
-    }
+  __disable_irq();
+}
+
+void
+ExitCriticalSection( void )
+{
+  __enable_irq();
 }
