@@ -118,6 +118,8 @@ void            vMBTCPPortClose( void );
 
 void            vMBTCPPortDisable( void );
 
+void            modbus_tcps(uint8_t sn, uint16_t port);
+
 BOOL            xMBTCPPortGetRequest( UCHAR **ppucMBTCPFrame, USHORT * usTCPLength );
 
 BOOL            xMBTCPPortSendResponse( const UCHAR *pucMBTCPFrame, USHORT usTCPLength );
