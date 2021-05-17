@@ -19,6 +19,7 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "adc.h"
 #include "spi.h"
 #include "usart.h"
 #include "gpio.h"
@@ -60,6 +61,7 @@
 
 #define REG_DISCRETE_START    0x0001	
 #define REG_DISCRETE_SIZE     16			
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -75,8 +77,8 @@ volatile bool ip_assigned = false;
 
 uint16_t usRegInputBuf[REG_INPUT_NREGS] = {0x1000,0x1001,0x1002,0x1003,0x1004,0x1005,0x1006,0x1007};
 uint16_t usRegHoldingBuf[REG_HOLDING_NREGS] = {0x2000,0x2001,0x2002,0x2003,0x2004,0x2005,0x2006,0x2007};					
-uint8_t ucRegCoilsBuf[REG_COILS_SIZE] = {0x01,0x01,0x00,0x00,0x01,0x00,0x01,0x00,0x01,0x00,0x01,0x00,0x01,0x00,0x01,0x00};
-uint8_t ucRegDiscreteBuf[REG_DISCRETE_SIZE] = {0x01,0x01,0x00,0x00,0x01,0x00,0x01,0x00,0x01,0x00,0x01,0x00,0x01,0x00,0x01,0x01}; 
+uint8_t ucRegCoilsBuf[REG_COILS_SIZE/8] = {0xaa,0xfe};
+uint8_t ucRegDiscreteBuf[REG_DISCRETE_SIZE/8] = {0x98, 0x6e}; 
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -154,7 +156,7 @@ void init_w5500() {
   getGWfromDHCP(net_info.gw);
   getSNfromDHCP(net_info.sn);
 
-  printf("IP:  %d.%d.%d.%d\r\nGW:  %d.%d.%d.%d\r\nNet: %d.%d.%d.%d\r\nDNS: %d.%d.%d.%d\r\n",
+  printf("IP:  %d.%d.%d.%d\r\nGW:  %d.%d.%d.%d\r\nNet: %d.%d.%d.%d\r\n",
     net_info.ip[0], net_info.ip[1], net_info.ip[2], net_info.ip[3],
     net_info.gw[0], net_info.gw[1], net_info.gw[2], net_info.gw[3],
     net_info.sn[0], net_info.sn[1], net_info.sn[2], net_info.sn[3]
@@ -178,9 +180,6 @@ void init_w5500() {
 int main(void)
 {
   /* USER CODE BEGIN 1 */
-  uint8_t tmp;
-  uint8_t sn = 0;
-  uint16_t port = MBTCP_PORT;
   eMBErrorCode eStatus;
   /* USER CODE END 1 */
 
@@ -204,6 +203,7 @@ int main(void)
   MX_GPIO_Init();
   MX_SPI5_Init();
   MX_USART1_UART_Init();
+  MX_ADC1_Init();
   /* USER CODE BEGIN 2 */
   init_w5500();
   HAL_Delay(200);
@@ -211,6 +211,7 @@ int main(void)
   HAL_Delay(200);
   eMBEnable();
   printf("\r\nModbus-TCP Start!\r\n");
+  HAL_ADC_Start(&hadc1);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -218,6 +219,7 @@ int main(void)
   while (1)
   {
 
+    usRegHoldingBuf[5] = HAL_ADC_GetValue(&hadc1);
     modbus_tcps(HTTP_SOCKET, MBTCP_PORT);
 
     /* USER CODE END WHILE */
@@ -268,7 +270,7 @@ void SystemClock_Config(void)
   LL_SetSystemCoreClock(72000000);
 
    /* Update the time base */
-  if (HAL_InitTick(TICK_INT_PRIORITY) != HAL_OK)
+  if (HAL_InitTick (TICK_INT_PRIORITY) != HAL_OK)
   {
     Error_Handler();
   }
@@ -297,14 +299,12 @@ eMBRegHoldingCB(UCHAR *pucRegBuffer, USHORT usAddress, USHORT usNRegs,
         *pucRegBuffer++ =
             (unsigned char)(usRegHoldingBuf[iRegIndex] >> 8);
         *pucRegBuffer++ =
-            (unsigned char)(usRegHoldingBuf[iRegIndex] &
-                            0xFF);
+            (unsigned char)(usRegHoldingBuf[iRegIndex] & 0xFF);
         iRegIndex++;
         usNRegs--;
       }
       break;
-      /* Update current register values with new values from the
-                 * protocol stack. */
+    /* Update current register values with new values from the protocol stack. */
     case MB_REG_WRITE:
       while (usNRegs > 0)
       {
