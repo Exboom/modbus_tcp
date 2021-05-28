@@ -20,6 +20,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "adc.h"
+#include "rtc.h"
 #include "spi.h"
 #include "usart.h"
 #include "gpio.h"
@@ -32,6 +33,8 @@
 #include <stdio.h>
 #include "socket.h"
 #include "dhcp.h"
+#include "dns.h"
+#include "sntp.h"
 #include "w5500.h"
 #include "mb.h"
 #include "mbproto.h"
@@ -46,7 +49,7 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define DHCP_SOCKET     0
-#define DNS_SOCKET      1
+#define SNTP_SOCKET      1
 #define HTTP_SOCKET     0
 #define MBTCP_PORT      502
 
@@ -73,7 +76,14 @@
 
 /* USER CODE BEGIN PV */
 uint8_t dhcp_buffer[1024];
+uint8_t dns_buffer[200];
+uint8_t ntp_buf[48];
 volatile bool ip_assigned = false;
+
+uint8_t ntp_domain_serv[] = "ntp5.stratum1.ru";
+uint8_t ntp_ip_serv[4] = {0};
+datetime ntp_time;
+volatile bool time_assigned = false;
 
 uint16_t usRegInputBuf[REG_INPUT_NREGS] = {0x1000,0x1001,0x1002,0x1003,0x1004,0x1005,0x1006,0x1007};
 uint16_t usRegHoldingBuf[REG_HOLDING_NREGS] = {0x2000,0x2001,0x2002,0x2003,0x2004,0x2005,0x2006,0x2007};					
@@ -110,6 +120,11 @@ void Callback_IPAssigned(void) {
 }
 void Callback_IPConflict(void) {
     printf("Callback: IP conflict!\r\n");
+}
+void Callback_TimeAssigned(void) {
+    printf("Callback: Time assigned! \r\n");
+    time_assigned = true;
+    printf("NTP Time: %d.%d.%d %d:%d:%d \r\n",ntp_time.dd, ntp_time.mm, ntp_time.yy, ntp_time.hh, ntp_time.mm,ntp_time.ss);
 }
 
 void init_w5500() {
@@ -156,14 +171,42 @@ void init_w5500() {
   getGWfromDHCP(net_info.gw);
   getSNfromDHCP(net_info.sn);
 
-  printf("IP:  %d.%d.%d.%d\r\nGW:  %d.%d.%d.%d\r\nNet: %d.%d.%d.%d\r\n",
+  uint8_t dns[4];
+  getDNSfromDHCP(dns);
+
+  printf("IP:  %d.%d.%d.%d\r\nGW:  %d.%d.%d.%d\r\nNet: %d.%d.%d.%d\r\n" "DNS: %d.%d.%d.%d\r\n",
     net_info.ip[0], net_info.ip[1], net_info.ip[2], net_info.ip[3],
     net_info.gw[0], net_info.gw[1], net_info.gw[2], net_info.gw[3],
-    net_info.sn[0], net_info.sn[1], net_info.sn[2], net_info.sn[3]
+    net_info.sn[0], net_info.sn[1], net_info.sn[2], net_info.sn[3], 
+    dns[0], dns[1], dns[2], dns[3]
   );
 
   printf("Calling wizchip_setnetinfo()...\r\n");
   wizchip_setnetinfo(&net_info);
+
+  reg_ntp_cbfunc(
+    Callback_TimeAssigned
+  );
+
+  printf("Calling translate Domain to IP...\r\n");
+  DNS_init(SNTP_SOCKET, dns_buffer);
+  if (DNS_run(dns, ntp_domain_serv, ntp_ip_serv) > 0) {
+    printf("Translated %s to %d.%d.%d.%d\r\n", ntp_domain_serv, ntp_ip_serv[0], ntp_ip_serv[1], ntp_ip_serv[2], ntp_ip_serv[3]);
+    SNTP_init(SNTP_SOCKET, ntp_ip_serv, 28, ntp_buf);
+    uint32_t ctr_t = 100000;
+    while ((!time_assigned) && (ctr_t > 0)) {
+      SNTP_run(&ntp_time);
+      ctr_t--;
+    }
+    if (!time_assigned) {
+      printf("\r\nTime was not assigned :(\r\n");
+      return;
+    }
+  }
+  else {
+    printf("Translated %s to IP failed\r\n", ntp_domain_serv);
+    printf("SNTP don't start\r\n");
+  }
 }
 
 /* USER CODE END PFP */
@@ -204,6 +247,7 @@ int main(void)
   MX_SPI5_Init();
   MX_USART1_UART_Init();
   MX_ADC1_Init();
+  MX_RTC_Init();
   /* USER CODE BEGIN 2 */
   init_w5500();
   HAL_Delay(200);
@@ -249,6 +293,21 @@ void SystemClock_Config(void)
   {
 
   }
+  LL_RCC_LSI_Enable();
+
+   /* Wait till LSI is ready */
+  while(LL_RCC_LSI_IsReady() != 1)
+  {
+
+  }
+  LL_PWR_EnableBkUpAccess();
+  if(LL_RCC_GetRTCClockSource() != LL_RCC_RTC_CLKSOURCE_LSI)
+  {
+    LL_RCC_ForceBackupDomainReset();
+    LL_RCC_ReleaseBackupDomainReset();
+    LL_RCC_SetRTCClockSource(LL_RCC_RTC_CLKSOURCE_LSI);
+  }
+  LL_RCC_EnableRTC();
   LL_RCC_PLL_ConfigDomain_SYS(LL_RCC_PLLSOURCE_HSE, LL_RCC_PLLM_DIV_4, 72, LL_RCC_PLLP_DIV_2);
   LL_RCC_PLL_Enable();
 

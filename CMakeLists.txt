@@ -49,7 +49,7 @@ endif ()
 include_directories(Core/Inc
         Drivers/STM32F4xx_HAL_Driver/Inc Drivers/STM32F4xx_HAL_Driver/Inc/Legacy
         Drivers/CMSIS/Device/ST/STM32F4xx/Include Drivers/CMSIS/Include
-        Drivers/IO_Driver/Ethernet Drivers/IO_Driver/Internet/DHCP Drivers/IO_Driver/Internet/DNS
+        Drivers/IO_Driver/Ethernet Drivers/IO_Driver/Internet/DHCP Drivers/IO_Driver/Internet/DNS Drivers/IO_Driver/Internet/SNTP
         Drivers/modbus_tcp Drivers/modbus_tcp/inc Drivers/modbus_tcp/src)
 
 add_definitions(-DUSE_FULL_LL_DRIVER -DUSE_HAL_DRIVER -DSTM32F429xx)
